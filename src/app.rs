@@ -3,37 +3,30 @@ use eframe::{egui_wgpu::RenderState, CreationContext};
 use crate::gpu::compute_remove_red;
 use crate::image_io::{self, LoadedImage};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+pub struct InternalState {
+    image_path: PathBuf,
+    output_texture: eframe::egui::TextureHandle,
+    image_size: eframe::egui::Vec2,
+}
 
 pub struct CvApp {
-    current_image_path: Option<PathBuf>,
-    output_texture: Option<eframe::egui::TextureHandle>,
-    image_size: eframe::egui::Vec2,
-    startup_error: Option<String>,
+    render_state: Option<Arc<RenderState>>,
+    last_error: Option<String>,
+    state: Option<InternalState>,
 }
 
 impl CvApp {
-    pub fn new(creation_context: &eframe::CreationContext<'_>, image_path: &str) -> Self {
-        match Self::initialize(creation_context, image_path) {
-            Ok((output_texture, image_size)) => Self {
-                current_image_path: None,
-                output_texture: Some(output_texture),
-                image_size,
-                startup_error: None,
-            },
-            Err(error) => Self {
-                current_image_path: None,
-                output_texture: None,
-                image_size: eframe::egui::vec2(1.0, 1.0),
-                startup_error: Some(error),
-            },
+    pub fn new(creation_context: &CreationContext<'_>) -> Self {
+        CvApp {
+            render_state: creation_context
+                .wgpu_render_state
+                .clone()
+                .map(Arc::new),
+            last_error: None,
+            state: None,
         }
-    }
-
-    fn initialize(
-        creation_context: &eframe::CreationContext<'_>,
-        image_path: &str,
-    ) -> Result<(eframe::egui::TextureHandle, eframe::egui::Vec2), String> {
-
     }
 
     fn downscale_if_needed(img: LoadedImage, max_side: u32) -> Result<LoadedImage, String> {
@@ -70,10 +63,26 @@ impl CvApp {
             return Err(String::from("Selected file path is not valid UTF-8"));
         };
         let source_image = image_io::load_rgba8_from_path(path)?;
-        self.current_image_path = Some(pathbuf);
-        
 
-        return Ok(());
+        let output_image =
+            compute_remove_red::run(&render_state.device, &render_state.queue, &source_image)?;
+        let output_image = CvApp::downscale_if_needed(output_image, 2048)?;
+        let color_image = eframe::egui::ColorImage::from_rgba_unmultiplied(
+            [output_image.width as usize, output_image.height as usize],
+            &output_image.rgba8,
+        );
+        let output_texture = ctx.load_texture(
+            "remove_red_output",
+            color_image,
+            eframe::egui::TextureOptions::LINEAR,
+        );
+        self.state = Some(InternalState {
+            image_path: pathbuf,
+            output_texture,
+            image_size: eframe::egui::Vec2::new(output_image.width as f32, output_image.height as f32),
+        });
+
+        Ok(())
     }
 }
 
@@ -82,37 +91,67 @@ impl eframe::App for CvApp {
         eframe::egui::CentralPanel::default()
             .frame(eframe::egui::Frame::new().fill(eframe::egui::Color32::BLACK))
             .show(ctx, |ui| {
+                let choose_image_button = ui.button("Choose image");
+                if choose_image_button.clicked() {
+                    let picked = rfd::FileDialog::new()
+                        .add_filter(
+                            "Image",
+                            &[
+                                "png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp", "ico",
+                                "avif",
+                            ],
+                        )
+                        .pick_file();
+
+                    if let Some(path) = picked {
+                        let Some(render_state) = self.render_state.clone() else {
+                            self.last_error = Some(
+                                "wgpu render state unavailable: ensure eframe uses wgpu backend"
+                                    .to_owned(),
+                            );
+                            return;
+                        };
+
+                        match self.process_image_path(ctx, render_state.as_ref(), &path) {
+                            Ok(()) => {
+                                self.last_error = None;
+                                ctx.request_repaint();
+                            }
+                            Err(e) => {
+                                self.last_error = Some(e);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(error) = &self.last_error {
+                    ui.colored_label(eframe::egui::Color32::LIGHT_RED, error);
+                }
+
                 let viewport_size = ui.available_size_before_wrap();
                 let (_id, viewport_rect) = ui.allocate_space(viewport_size);
+                let Some(state) = &self.state else {
+                    return;
+                };
 
-                if let Some(output_texture) = &self.output_texture {
-                    let fitted_local = crate::layout::contain_rect(
-                        viewport_rect.width(),
-                        viewport_rect.height(),
-                        self.image_size.x,
-                        self.image_size.y,
-                    );
-                    let fitted_rect = fitted_local.translate(viewport_rect.min.to_vec2());
-                    let uv = eframe::egui::Rect::from_min_max(
-                        eframe::egui::pos2(0.0, 0.0),
-                        eframe::egui::pos2(1.0, 1.0),
-                    );
-                    ui.painter().image(
-                        output_texture.id(),
-                        fitted_rect,
-                        uv,
-                        eframe::egui::Color32::WHITE,
-                    );
-                } else if let Some(error) = &self.startup_error {
-                    let font = eframe::egui::TextStyle::Heading.resolve(ui.style());
-                    ui.painter().text(
-                        viewport_rect.center(),
-                        eframe::egui::Align2::CENTER_CENTER,
-                        error,
-                        font,
-                        eframe::egui::Color32::LIGHT_RED,
-                    );
-                }
+                let output_texture = &state.output_texture;
+                let fitted_local = crate::layout::contain_rect(
+                    viewport_rect.width(),
+                    viewport_rect.height(),
+                    state.image_size.x,
+                    state.image_size.y,
+                );
+                let fitted_rect = fitted_local.translate(viewport_rect.min.to_vec2());
+                let uv = eframe::egui::Rect::from_min_max(
+                    eframe::egui::pos2(0.0, 0.0),
+                    eframe::egui::pos2(1.0, 1.0),
+                );
+                ui.painter().image(
+                    output_texture.id(),
+                    fitted_rect,
+                    uv,
+                    eframe::egui::Color32::WHITE,
+                );
             });
     }
 }

@@ -21,10 +21,7 @@ fn main() -> eframe::Result<()> {
         "WebGPU CV - Remove Red",
         native_options,
         Box::new(|creation_context| {
-            Ok(Box::new(app::CvApp::new(
-                creation_context,
-                HARDCODED_IMAGE_PATH,
-            )))
+            Ok(Box::new(app::CvApp::new(creation_context)))
         }),
     )
 }
