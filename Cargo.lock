@@ -3972,6 +3972,7 @@ dependencies = [
  "image",
  "pollster",
  "rfd",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

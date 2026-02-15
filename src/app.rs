@@ -1,6 +1,6 @@
 use eframe::{egui_wgpu::RenderState, CreationContext};
 
-use crate::gpu::compute_remove_red;
+use crate::renderer::ComputeRenderer;
 use crate::image_io::{self, LoadedImage};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,6 +13,7 @@ pub struct InternalState {
 
 pub struct CvApp {
     render_state: Option<Arc<RenderState>>,
+    compute_renderer: Option<ComputeRenderer>,
     last_error: Option<String>,
     state: Option<InternalState>,
 }
@@ -24,6 +25,7 @@ impl CvApp {
                 .wgpu_render_state
                 .clone()
                 .map(Arc::new),
+            compute_renderer: None,
             last_error: None,
             state: None,
         }
@@ -64,8 +66,18 @@ impl CvApp {
         };
         let source_image = image_io::load_rgba8_from_path(path)?;
 
-        let output_image =
-            compute_remove_red::run(&render_state.device, &render_state.queue, &source_image)?;
+        if self.compute_renderer.is_none() {
+            self.compute_renderer = Some(
+                ComputeRenderer::new(&render_state.device).map_err(|error| error.to_string())?,
+            );
+        }
+
+        let output_image = self
+            .compute_renderer
+            .as_ref()
+            .expect("renderer initialized above")
+            .process_image(&render_state.device, &render_state.queue, &source_image)
+            .map_err(|error| error.to_string())?;
         let output_image = CvApp::downscale_if_needed(output_image, 2048)?;
         let color_image = eframe::egui::ColorImage::from_rgba_unmultiplied(
             [output_image.width as usize, output_image.height as usize],

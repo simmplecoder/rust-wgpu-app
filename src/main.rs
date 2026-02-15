@@ -1,5 +1,5 @@
 mod app;
-mod gpu;
+mod renderer;
 mod image_io;
 mod layout;
 
