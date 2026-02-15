@@ -9,7 +9,7 @@ const HARDCODED_IMAGE_PATH: &str =
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("WebGPU CV - Remove Red")
+            .with_title("Image Processing App")
             .with_inner_size([1920.0, 1080.0])
             .with_min_inner_size([1920.0, 1080.0])
             .with_max_inner_size([1920.0, 1080.0])
@@ -18,7 +18,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "WebGPU CV - Remove Red",
+        "Image Processing App",
         native_options,
         Box::new(|creation_context| {
             Ok(Box::new(app::CvApp::new(creation_context)))

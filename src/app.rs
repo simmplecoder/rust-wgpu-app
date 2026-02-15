@@ -2,11 +2,10 @@ use eframe::{egui_wgpu::RenderState, CreationContext};
 
 use crate::renderer::ComputeRenderer;
 use crate::image_io::{self, LoadedImage};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 pub struct InternalState {
-    image_path: PathBuf,
     output_texture: eframe::egui::TextureHandle,
     image_size: eframe::egui::Vec2,
 }
@@ -84,12 +83,11 @@ impl CvApp {
             &output_image.rgba8,
         );
         let output_texture = ctx.load_texture(
-            "remove_red_output",
+            "output",
             color_image,
             eframe::egui::TextureOptions::LINEAR,
         );
         self.state = Some(InternalState {
-            image_path: pathbuf,
             output_texture,
             image_size: eframe::egui::Vec2::new(output_image.width as f32, output_image.height as f32),
         });
