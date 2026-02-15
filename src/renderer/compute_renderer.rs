@@ -15,13 +15,13 @@ pub struct ComputeRenderer {
 impl ComputeRenderer {
     pub fn new(device: &wgpu::Device) -> Result<Self, ComputeRendererError> {
         let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("remove_red_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/remove_red.wgsl").into()),
+            label: Some("to_grayscale_shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/to_grayscale.wgsl").into()),
         });
 
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("remove_red_bind_group_layout"),
+                label: Some("to_grayscale_bind_group_layout"),
                 entries: &[
                     BindGroupLayoutEntry {
                         binding: 0,
@@ -47,13 +47,13 @@ impl ComputeRenderer {
             });
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("remove_red_pipeline_layout"),
+            label: Some("to_grayscale_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("remove_red_pipeline"),
+            label: Some("to_grayscale_pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: Some("main"),
