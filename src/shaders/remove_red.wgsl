@@ -13,5 +13,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let coordinate = vec2<i32>(gid.xy);
     let pixel = textureLoad(source_texture, coordinate, 0);
-    textureStore(destination_texture, coordinate, vec4<f32>(0.0, pixel.g, pixel.b, pixel.a));
+    let gray = dot(pixel.rgb, vec3<f32>(0.216, 0.7152, 0.0722));
+    textureStore(destination_texture, coordinate, vec4<f32>(gray, gray, gray, pixel.a));
 }
