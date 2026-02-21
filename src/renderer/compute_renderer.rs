@@ -1,69 +1,27 @@
 use eframe::wgpu::{
-    self, BindGroupDescriptor, BindGroupEntry, BindGroupLayoutEntry, BindingResource,
-    CommandEncoderDescriptor, ComputePassDescriptor, ComputePipelineDescriptor,
-    PipelineLayoutDescriptor, ShaderModuleDescriptor, TextureAspect, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
+    self, CommandEncoderDescriptor, TextureAspect, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 
-use crate::{image_io::LoadedImage, renderer::ComputeRendererError};
+use crate::{
+    image_io::LoadedImage,
+    renderer::{
+        grayscale::{GrayscaleEncodeArgs, GrayscalePass},
+        sobel::{SobelEncodeArgs, SobelPass},
+        ComputeRendererError,
+    },
+};
 
 pub struct ComputeRenderer {
-    pipeline: wgpu::ComputePipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    grayscale_pass: GrayscalePass,
+    sobel_pass: SobelPass,
 }
 
 impl ComputeRenderer {
     pub fn new(device: &wgpu::Device) -> Result<Self, ComputeRendererError> {
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("sobel_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/sobel.wgsl").into()),
-        });
-
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("sobel_bind_group_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::StorageTexture {
-                            access: wgpu::StorageTextureAccess::WriteOnly,
-                            format: wgpu::TextureFormat::Rgba8Unorm,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("sobel_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("sobel_pipeline"),
-            layout: Some(&pipeline_layout),
-            module: &shader,
-            entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
-
         Ok(ComputeRenderer {
-            pipeline,
-            bind_group_layout,
+            grayscale_pass: GrayscalePass::new(device),
+            sobel_pass: SobelPass::new(device),
         })
     }
 
@@ -74,6 +32,16 @@ impl ComputeRenderer {
         input: &wgpu::Texture,
         size: wgpu::Extent3d,
     ) -> Result<wgpu::Texture, ComputeRendererError> {
+        let grayscale_texture = device.create_texture(&TextureDescriptor {
+            label: Some("compute_renderer.grayscale_texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::STORAGE_BINDING | TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
         let destination_texture = device.create_texture(&TextureDescriptor {
             label: Some("compute_renderer.destination_texture"),
             size,
@@ -86,34 +54,30 @@ impl ComputeRenderer {
         });
 
         let source_view = input.create_view(&TextureViewDescriptor::default());
+        let grayscale_view = grayscale_texture.create_view(&TextureViewDescriptor::default());
         let destination_view = destination_texture.create_view(&TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("compute_renderer.bind_group"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&source_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(&destination_view),
-                },
-            ],
-        });
 
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("compute_renderer.encoder"),
         });
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("compute_renderer.compute_pass"),
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-            compute_pass.dispatch_workgroups(div_ceil(size.width, 8), div_ceil(size.height, 8), 1);
-        }
+
+        self.grayscale_pass.encode(GrayscaleEncodeArgs {
+            device,
+            encoder: &mut encoder,
+            src_view: &source_view,
+            dst_view: &grayscale_view,
+            width: size.width,
+            height: size.height,
+        });
+
+        self.sobel_pass.encode(SobelEncodeArgs {
+            device,
+            encoder: &mut encoder,
+            src_view: &grayscale_view,
+            dst_view: &destination_view,
+            width: size.width,
+            height: size.height,
+        });
 
         queue.submit([encoder.finish()]);
         Ok(destination_texture)
@@ -226,10 +190,6 @@ impl ComputeRenderer {
             rgba8,
         })
     }
-}
-
-fn div_ceil(value: u32, divisor: u32) -> u32 {
-    value.div_ceil(divisor)
 }
 
 fn padded_bytes_per_row(width: u32) -> u32 {

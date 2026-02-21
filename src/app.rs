@@ -59,7 +59,6 @@ impl CvApp {
         render_state: &RenderState,
         path: &Path,
     ) -> Result<(), String> {
-        let pathbuf = path.to_path_buf();
         let Some(path) = path.as_os_str().to_str() else {
             return Err(String::from("Selected file path is not valid UTF-8"));
         };
