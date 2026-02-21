@@ -3,9 +3,6 @@ mod renderer;
 mod image_io;
 mod layout;
 
-const HARDCODED_IMAGE_PATH: &str =
-    r"C:\Users\anony\Pictures\Screenshots\Screenshot 2024-10-13 165336.png";
-
 fn main() -> eframe::Result<()> {
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
